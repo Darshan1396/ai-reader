@@ -1,196 +1,125 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
-import "pdfjs-dist/build/pdf.worker.mjs";
+import pdfWorker from "pdfjs-dist/build/pdf.worker.mjs?url";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-  `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 function App() {
-  const [sentences, setSentences] = useState<string[]>([]);
-  const [currentIndex, setCurrentIndex] = useState<number>(-1);
-  const [selectedVoice, setSelectedVoice] =
-    useState<SpeechSynthesisVoice | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [rate, setRate] = useState(1);
+  const [text, setText] = useState("");
+  const [currentLine, setCurrentLine] = useState<number | null>(null);
 
-  /* ---------------------- FORCE MALE ENGLISH VOICE ---------------------- */
-  useEffect(() => {
-    const synth = window.speechSynthesis;
+  const cleanText = (rawText: string) => {
+    let lines = rawText.split("\n");
 
-    const loadVoices = () => {
-      const voices = synth.getVoices();
+    lines = lines.filter((line) => {
+      const trimmed = line.trim();
 
-      const maleVoice =
-        voices.find(
-          (v) =>
-            v.lang === "en-US" &&
-            (v.name.toLowerCase().includes("david") ||
-              v.name.toLowerCase().includes("mark") ||
-              v.name.toLowerCase().includes("john") ||
-              v.name.toLowerCase().includes("male"))
-        ) ||
-        voices.find(
-          (v) =>
-            v.lang === "en-GB" &&
-            (v.name.toLowerCase().includes("david") ||
-              v.name.toLowerCase().includes("male"))
-        );
+      if (!trimmed) return false;
 
-      setSelectedVoice(maleVoice || voices[0]);
-    };
+      // Remove page numbers
+      if (/^page\s*\d+/i.test(trimmed)) return false;
+      if (/^\d+$/.test(trimmed)) return false;
 
-    loadVoices();
-    synth.onvoiceschanged = loadVoices;
-  }, []);
+      // Remove emails
+      if (trimmed.includes("@")) return false;
 
-  /* ---------------------- CLEAN PDF CONTENT ---------------------- */
-  function cleanPDFText(rawText: string): string {
-    const lines = rawText.split("\n");
+      // Remove ALL CAPS lines (college names)
+      if (
+        trimmed === trimmed.toUpperCase() &&
+        trimmed.length > 5 &&
+        trimmed.length < 120
+      )
+        return false;
 
-    const filtered = lines.filter((line) => {
-      const lower = line.toLowerCase().trim();
+      // Remove very short lines
+      if (trimmed.length < 20) return false;
 
-      // Remove unwanted header/footer patterns
-      if (lower.includes("rv college")) return false;
-      if (lower.includes("assistant professor")) return false;
-      if (lower.includes("department of")) return false;
-      if (lower.includes("prepared by")) return false;
-      if (lower.includes("bengaluru")) return false;
-      if (lower.includes("email")) return false;
-      if (lower.includes("phone")) return false;
-      if (lower.match(/^\d+$/)) return false; // page numbers only
-      if (lower.length < 3) return false;
+      // Remove header keywords
+      if (
+        trimmed.toLowerCase().includes("department") ||
+        trimmed.toLowerCase().includes("university") ||
+        trimmed.toLowerCase().includes("college") ||
+        trimmed.toLowerCase().includes("professor") ||
+        trimmed.toLowerCase().includes("subject code")
+      )
+        return false;
 
       return true;
     });
 
-    return filtered.join(" ");
-  }
+    return lines.join("\n");
+  };
 
-  /* ---------------------- HANDLE PDF UPLOAD ---------------------- */
-  const handleFile = async (e: any) => {
-    const file = e.target.files[0];
+  const handleFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
 
     reader.onload = async function () {
-      const typedarray = new Uint8Array(this.result as ArrayBuffer);
-      const pdf = await pdfjsLib.getDocument(typedarray).promise;
+      const typedArray = new Uint8Array(this.result as ArrayBuffer);
+      const pdf = await pdfjsLib.getDocument(typedArray).promise;
 
-      let fullText = "";
+      let extractedText = "";
 
-      // 🔥 Skip first page automatically
+      // Skip first page
       for (let i = 2; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         const content = await page.getTextContent();
-        const strings = content.items.map((item: any) => item.str);
-        fullText += strings.join(" ") + "\n";
+
+        const pageText = content.items
+          .map((item: any) => item.str)
+          .join(" ");
+
+        extractedText += pageText + "\n";
       }
 
-      const cleanedText = cleanPDFText(fullText);
-
-      const splitSentences = cleanedText
-        .replace(/\s+/g, " ")
-        .split(/(?<=[.!?])\s+/)
-        .filter((s) => s.trim() !== "");
-
-      setSentences(splitSentences);
+      const finalText = cleanText(extractedText);
+      setText(finalText);
     };
 
     reader.readAsArrayBuffer(file);
   };
 
-  /* ---------------------- SPEECH FUNCTION ---------------------- */
-  const speak = () => {
-    if (!sentences.length) return;
+  const speakText = () => {
+    if (!text) return;
 
-    const synth = window.speechSynthesis;
-    synth.cancel();
-    setIsPlaying(true);
+    const utterance = new SpeechSynthesisUtterance(text);
 
-    sentences.forEach((sentence, index) => {
-      const utter = new SpeechSynthesisUtterance(sentence);
+    const voices = window.speechSynthesis.getVoices();
+    const maleVoice =
+      voices.find((v) =>
+        v.name.toLowerCase().includes("david")
+      ) || voices.find((v) => v.lang === "en-US");
 
-      if (selectedVoice) utter.voice = selectedVoice;
+    if (maleVoice) utterance.voice = maleVoice;
 
-      utter.lang = "en-US";
-      utter.rate = rate;
-      utter.pitch = 0.9;
+    utterance.rate = 0.95;
+    utterance.pitch = 0.85;
 
-      utter.onstart = () => {
-        setCurrentIndex(index);
-      };
-
-      if (index === sentences.length - 1) {
-        utter.onend = () => {
-          setIsPlaying(false);
-          setCurrentIndex(-1);
-        };
-      }
-
-      synth.speak(utter);
-    });
-  };
-
-  const pause = () => window.speechSynthesis.pause();
-  const resume = () => window.speechSynthesis.resume();
-  const stop = () => {
     window.speechSynthesis.cancel();
-    setIsPlaying(false);
-    setCurrentIndex(-1);
+    window.speechSynthesis.speak(utterance);
   };
 
-  /* ---------------------- UI ---------------------- */
   return (
-    <div style={{ padding: "40px", maxWidth: "900px", margin: "auto" }}>
-      <h1>AI Study Reader (Clean Mode)</h1>
+    <div style={{ padding: "30px", fontFamily: "Arial" }}>
+      <h2>Clean Academic PDF Reader</h2>
 
-      <input type="file" accept=".pdf" onChange={handleFile} />
+      <input type="file" accept="application/pdf" onChange={handleFile} />
+      <br /><br />
 
-      <div style={{ marginTop: "15px" }}>
-        <label>Speed: {rate}x </label>
-        <input
-          type="range"
-          min="0.5"
-          max="2"
-          step="0.1"
-          value={rate}
-          onChange={(e) => setRate(Number(e.target.value))}
-        />
-      </div>
+      <button onClick={speakText}>Read Content</button>
 
-      <div style={{ marginTop: "20px" }}>
-        <button onClick={speak} disabled={isPlaying}>
-          Play
-        </button>
-        <button onClick={pause} style={{ marginLeft: "10px" }}>
-          Pause
-        </button>
-        <button onClick={resume} style={{ marginLeft: "10px" }}>
-          Resume
-        </button>
-        <button onClick={stop} style={{ marginLeft: "10px" }}>
-          Stop
-        </button>
-      </div>
-
-      <div style={{ marginTop: "30px" }}>
-        {sentences.map((sentence, index) => (
-          <p
-            key={index}
-            style={{
-              background:
-                currentIndex === index ? "#a8f5a2" : "transparent",
-              padding: "5px",
-              borderRadius: "4px",
-              lineHeight: "1.6",
-            }}
-          >
-            {sentence}
-          </p>
-        ))}
-      </div>
+      <pre style={{
+        marginTop: "20px",
+        whiteSpace: "pre-wrap",
+        lineHeight: "1.6",
+        background: "#f5f5f5",
+        padding: "15px",
+        borderRadius: "10px"
+      }}>
+        {text}
+      </pre>
     </div>
   );
 }
