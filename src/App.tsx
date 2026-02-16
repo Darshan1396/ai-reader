@@ -13,7 +13,7 @@ function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [rate, setRate] = useState(1);
 
-  // Auto-select best voice
+  // 🔥 Improved English Voice Selection
   useEffect(() => {
     const synth = window.speechSynthesis;
 
@@ -21,8 +21,9 @@ function App() {
       const voices = synth.getVoices();
 
       const preferred =
-        voices.find(v => v.name.includes("Google")) ||
-        voices.find(v => v.name.includes("Microsoft")) ||
+        voices.find(v => v.lang === "en-US" && v.name.includes("Google")) ||
+        voices.find(v => v.lang === "en-GB") ||
+        voices.find(v => v.lang.startsWith("en")) ||
         voices[0];
 
       setSelectedVoice(preferred);
@@ -76,6 +77,7 @@ function App() {
         utter.voice = selectedVoice;
       }
 
+      utter.lang = "en-US"; // force proper English
       utter.rate = rate;
       utter.pitch = 1;
 
@@ -152,7 +154,8 @@ function App() {
               background:
                 currentIndex === index ? "#ffe066" : "transparent",
               padding: "5px",
-              borderRadius: "4px"
+              borderRadius: "4px",
+              lineHeight: "1.6"
             }}
           >
             {sentence}
