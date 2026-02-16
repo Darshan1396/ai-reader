@@ -13,20 +13,37 @@ function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [rate, setRate] = useState(1);
 
-  // 🔥 Improved English Voice Selection
+  // 🔥 FORCE MALE ENGLISH VOICE
   useEffect(() => {
     const synth = window.speechSynthesis;
 
     const loadVoices = () => {
       const voices = synth.getVoices();
 
-      const preferred =
-        voices.find(v => v.lang === "en-US" && v.name.includes("Google")) ||
-        voices.find(v => v.lang === "en-GB") ||
-        voices.find(v => v.lang.startsWith("en")) ||
-        voices[0];
+      // Try to find common male voice names
+      const maleVoice =
+        voices.find(v =>
+          v.lang === "en-US" &&
+          (
+            v.name.toLowerCase().includes("david") ||
+            v.name.toLowerCase().includes("mark") ||
+            v.name.toLowerCase().includes("john") ||
+            v.name.toLowerCase().includes("male")
+          )
+        ) ||
+        voices.find(v =>
+          v.lang === "en-GB" &&
+          (
+            v.name.toLowerCase().includes("david") ||
+            v.name.toLowerCase().includes("male")
+          )
+        ) ||
+        voices.find(v =>
+          v.lang.startsWith("en") &&
+          v.name.toLowerCase().includes("male")
+        );
 
-      setSelectedVoice(preferred);
+      setSelectedVoice(maleVoice || voices[0]);
     };
 
     loadVoices();
@@ -77,9 +94,9 @@ function App() {
         utter.voice = selectedVoice;
       }
 
-      utter.lang = "en-US"; // force proper English
+      utter.lang = "en-US";
       utter.rate = rate;
-      utter.pitch = 1;
+      utter.pitch = 0.9; // slightly deeper male tone
 
       utter.onstart = () => {
         setCurrentIndex(index);
