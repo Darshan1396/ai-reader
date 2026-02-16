@@ -1,125 +1,184 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import * as pdfjsLib from "pdfjs-dist";
-import pdfWorker from "pdfjs-dist/build/pdf.worker.mjs?url";
+import "pdfjs-dist/build/pdf.worker.mjs";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 function App() {
-  const [text, setText] = useState("");
-  const [currentLine, setCurrentLine] = useState<number | null>(null);
+  const [sentences, setSentences] = useState<string[]>([]);
+  const [currentIndex, setCurrentIndex] = useState<number>(-1);
+  const [selectedVoice, setSelectedVoice] =
+    useState<SpeechSynthesisVoice | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [rate, setRate] = useState(1);
 
-  const cleanText = (rawText: string) => {
-    let lines = rawText.split("\n");
+  // 🔥 FORCE MALE ENGLISH VOICE
+  useEffect(() => {
+    const synth = window.speechSynthesis;
 
-    lines = lines.filter((line) => {
-      const trimmed = line.trim();
+    const loadVoices = () => {
+      const voices = synth.getVoices();
 
-      if (!trimmed) return false;
+      // Try to find common male voice names
+      const maleVoice =
+        voices.find(v =>
+          v.lang === "en-US" &&
+          (
+            v.name.toLowerCase().includes("david") ||
+            v.name.toLowerCase().includes("mark") ||
+            v.name.toLowerCase().includes("john") ||
+            v.name.toLowerCase().includes("male")
+          )
+        ) ||
+        voices.find(v =>
+          v.lang === "en-GB" &&
+          (
+            v.name.toLowerCase().includes("david") ||
+            v.name.toLowerCase().includes("male")
+          )
+        ) ||
+        voices.find(v =>
+          v.lang.startsWith("en") &&
+          v.name.toLowerCase().includes("male")
+        );
 
-      // Remove page numbers
-      if (/^page\s*\d+/i.test(trimmed)) return false;
-      if (/^\d+$/.test(trimmed)) return false;
+      setSelectedVoice(maleVoice || voices[0]);
+    };
 
-      // Remove emails
-      if (trimmed.includes("@")) return false;
+    loadVoices();
+    synth.onvoiceschanged = loadVoices;
+  }, []);
 
-      // Remove ALL CAPS lines (college names)
-      if (
-        trimmed === trimmed.toUpperCase() &&
-        trimmed.length > 5 &&
-        trimmed.length < 120
-      )
-        return false;
-
-      // Remove very short lines
-      if (trimmed.length < 20) return false;
-
-      // Remove header keywords
-      if (
-        trimmed.toLowerCase().includes("department") ||
-        trimmed.toLowerCase().includes("university") ||
-        trimmed.toLowerCase().includes("college") ||
-        trimmed.toLowerCase().includes("professor") ||
-        trimmed.toLowerCase().includes("subject code")
-      )
-        return false;
-
-      return true;
-    });
-
-    return lines.join("\n");
-  };
-
-  const handleFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  const handleFile = async (e: any) => {
+    const file = e.target.files[0];
     if (!file) return;
 
     const reader = new FileReader();
 
     reader.onload = async function () {
-      const typedArray = new Uint8Array(this.result as ArrayBuffer);
-      const pdf = await pdfjsLib.getDocument(typedArray).promise;
+      const typedarray = new Uint8Array(this.result as ArrayBuffer);
+      const pdf = await pdfjsLib.getDocument(typedarray).promise;
 
-      let extractedText = "";
+      let fullText = "";
 
-      // Skip first page
-      for (let i = 2; i <= pdf.numPages; i++) {
+      for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         const content = await page.getTextContent();
-
-        const pageText = content.items
-          .map((item: any) => item.str)
-          .join(" ");
-
-        extractedText += pageText + "\n";
+        const strings = content.items.map((item: any) => item.str);
+        fullText += strings.join(" ") + " ";
       }
 
-      const finalText = cleanText(extractedText);
-      setText(finalText);
+      const splitSentences = fullText
+        .replace(/\s+/g, " ")
+        .split(/(?<=[.!?])\s+/)
+        .filter((s) => s.trim() !== "");
+
+      setSentences(splitSentences);
     };
 
     reader.readAsArrayBuffer(file);
   };
 
-  const speakText = () => {
-    if (!text) return;
+  const speak = () => {
+    if (!sentences.length) return;
 
-    const utterance = new SpeechSynthesisUtterance(text);
+    const synth = window.speechSynthesis;
+    synth.cancel();
+    setIsPlaying(true);
 
-    const voices = window.speechSynthesis.getVoices();
-    const maleVoice =
-      voices.find((v) =>
-        v.name.toLowerCase().includes("david")
-      ) || voices.find((v) => v.lang === "en-US");
+    sentences.forEach((sentence, index) => {
+      const utter = new SpeechSynthesisUtterance(sentence);
 
-    if (maleVoice) utterance.voice = maleVoice;
+      if (selectedVoice) {
+        utter.voice = selectedVoice;
+      }
 
-    utterance.rate = 0.95;
-    utterance.pitch = 0.85;
+      utter.lang = "en-US";
+      utter.rate = rate;
+      utter.pitch = 0.9; // slightly deeper male tone
 
+      utter.onstart = () => {
+        setCurrentIndex(index);
+      };
+
+      if (index === sentences.length - 1) {
+        utter.onend = () => {
+          setIsPlaying(false);
+          setCurrentIndex(-1);
+        };
+      }
+
+      synth.speak(utter);
+    });
+  };
+
+  const pause = () => {
+    window.speechSynthesis.pause();
+  };
+
+  const resume = () => {
+    window.speechSynthesis.resume();
+  };
+
+  const stop = () => {
     window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
+    setIsPlaying(false);
+    setCurrentIndex(-1);
   };
 
   return (
-    <div style={{ padding: "30px", fontFamily: "Arial" }}>
-      <h2>Clean Academic PDF Reader</h2>
+    <div style={{ padding: "40px", maxWidth: "900px", margin: "auto" }}>
+      <h1>AI Study Reader (PDF)</h1>
 
-      <input type="file" accept="application/pdf" onChange={handleFile} />
-      <br /><br />
+      <input type="file" accept=".pdf" onChange={handleFile} />
 
-      <button onClick={speakText}>Read Content</button>
+      <div style={{ marginTop: "15px" }}>
+        <label>Speed: {rate}x </label>
+        <input
+          type="range"
+          min="0.5"
+          max="2"
+          step="0.1"
+          value={rate}
+          onChange={(e) => setRate(Number(e.target.value))}
+        />
+      </div>
 
-      <pre style={{
-        marginTop: "20px",
-        whiteSpace: "pre-wrap",
-        lineHeight: "1.6",
-        background: "#f5f5f5",
-        padding: "15px",
-        borderRadius: "10px"
-      }}>
-        {text}
-      </pre>
+      <div style={{ marginTop: "20px" }}>
+        <button onClick={speak} disabled={isPlaying}>
+          Play
+        </button>
+
+        <button onClick={pause} style={{ marginLeft: "10px" }}>
+          Pause
+        </button>
+
+        <button onClick={resume} style={{ marginLeft: "10px" }}>
+          Resume
+        </button>
+
+        <button onClick={stop} style={{ marginLeft: "10px" }}>
+          Stop
+        </button>
+      </div>
+
+      <div style={{ marginTop: "30px" }}>
+        {sentences.map((sentence, index) => (
+          <p
+            key={index}
+            style={{
+              background:
+                currentIndex === index ? "#ffe066" : "transparent",
+              padding: "5px",
+              borderRadius: "4px",
+              lineHeight: "1.6"
+            }}
+          >
+            {sentence}
+          </p>
+        ))}
+      </div>
     </div>
   );
 }
